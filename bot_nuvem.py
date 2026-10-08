@@ -244,6 +244,9 @@ def _http_keepalive():
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"JARVIS OK")
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
         def log_message(self, *a):
             pass
 
