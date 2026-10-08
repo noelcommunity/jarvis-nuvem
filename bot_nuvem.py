@@ -18,6 +18,10 @@ ZEN_KEY = os.environ.get("ZEN_KEY", "")
 ZEN_MODEL = os.environ.get("ZEN_MODEL", "mimo-v2.6-flash-free")
 ZEN_BASE = os.environ.get("ZEN_BASE_URL", "https://opencode.ai/zen/v1/chat/completions")
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
+GROQ_MODELS = [m.strip() for m in os.environ.get(
+    "GROQ_MODEL",
+    "llama-3.3-70b-versatile,openai/gpt-oss-20b,qwen/qwen3-32b,moonshotai/kimi-k2-instruct-0905").split(",") if m.strip()]
+_GROQ_OK = ""
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -47,22 +51,25 @@ def cerebro(chat_id: int, texto: str) -> str:
             log.warning(f"zen {r.status_code}: {r.text[:150]}")
         except Exception as e:
             log.warning(f"zen falhou: {e}")
-    # 2. Groq (gratis)
+    # 2. Groq (gratis) — testa modelos em ordem, usa o primeiro que responder
     if GROQ_KEY:
-        try:
-            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                              headers={"Authorization": f"Bearer {GROQ_KEY}",
-                                       "Content-Type": "application/json"},
-                              json={"model": "llama-3.1-8b-instant", "messages": msgs,
-                                    "max_tokens": 400, "temperature": 0.7}, timeout=60)
-            if r.ok:
-                resp = r.json()["choices"][0]["message"]["content"].strip()
-                _hist[chat_id] = (hist + [{"role": "user", "content": texto},
-                                         {"role": "assistant", "content": resp}])[-8:]
-                return resp
-            log.warning(f"groq {r.status_code}: {r.text[:150]}")
-        except Exception as e:
-            log.warning(f"groq falhou: {e}")
+        modelos = ([_GROQ_OK] if _GROQ_OK else []) + [m for m in GROQ_MODELS if m != _GROQ_OK]
+        for _mod in modelos:
+            try:
+                r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                                  headers={"Authorization": f"Bearer {GROQ_KEY}",
+                                           "Content-Type": "application/json"},
+                                  json={"model": _mod, "messages": msgs,
+                                        "max_tokens": 400, "temperature": 0.7}, timeout=60)
+                if r.ok:
+                    globals()["_GROQ_OK"] = _mod
+                    resp = r.json()["choices"][0]["message"]["content"].strip()
+                    _hist[chat_id] = (hist + [{"role": "user", "content": texto},
+                                             {"role": "assistant", "content": resp}])[-8:]
+                    return resp
+                log.warning(f"groq {_mod} {r.status_code}: {r.text[:120]}")
+            except Exception as e:
+                log.warning(f"groq {_mod} falhou: {e}")
     # 3. Gemini (gratis)
     if GEMINI_KEY:
         try:
