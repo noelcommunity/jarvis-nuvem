@@ -8,6 +8,7 @@ Env vars do cerebro (uma basta): ZEN_KEY (+ ZEN_MODEL, ZEN_BASE) ou GROQ_KEY ou 
 """
 import os
 import time
+import threading
 import logging
 import requests
 
@@ -87,9 +88,29 @@ def tg(metodo: str, **kw):
         log.warning(f"tg {metodo}: {e}")
         return {}
 
+def _http_keepalive():
+    """Servidor HTTP minimo pro plano FREE (Web Service exige porta aberta)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Ok(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"JARVIS OK")
+        def log_message(self, *a):
+            pass
+
+    port = int(os.environ.get("PORT", "10000"))
+    try:
+        HTTPServer(("0.0.0.0", port), Ok).serve_forever()
+    except Exception as e:
+        log.warning(f"http keepalive: {e}")
+
 def main():
     if not TOKEN:
         raise SystemExit("Falta TELEGRAM_TOKEN nas env vars.")
+    threading.Thread(target=_http_keepalive, daemon=True).start()
     log.info("JARVIS nuvem online.")
     offset = 0
     while True:
