@@ -1,0 +1,23 @@
+# JARVIS NUVEM — conversa no Telegram com o notebook DESLIGADO
+# Pasta: Desktop\JARVIS\nuvem_telegram\  (sobe ela pro GitHub)
+
+1. Cria repo gratis no GitHub e sobe esses 2 arquivos (bot_nuvem.py + requirements.txt).
+
+2. Cria conta gratis no Render (render.com) > New > Background Worker >
+   conecta o repo. Start command:  python bot_nuvem.py
+
+3. Em Environment, adiciona:
+   TELEGRAM_TOKEN = o token do BotFather (MESMO token do bot atual)
+   ATENCAO: o bot do notebook e o da nuvem NAO podem rodar juntos no polling.
+   Quando ligar a nuvem, o JARVIS do PC para de receber (Telegram entrega pra 1 so).
+   Pra voltar pro PC, pausa o worker no Render (Suspend).
+   DONO         = noel
+   ZEN_KEY      = sua key do zen.env (pode dar 403 no plano free fora do OpenCode)
+   Se o Zen falhar, pega key gratis em Groq (console.groq.com) e usa GROQ_KEY.
+
+4. Deploy. Abre o bot no Telegram e manda /start.
+   Primeira resposta pode demorar ~1min (plano free dorme; UptimeRobot pingando resolve).
+
+5. Notebook pode desligar: a conversa mora na nuvem.
+
+Custo: Render free + Groq free = zero. Limite: free dorme sem uso.
