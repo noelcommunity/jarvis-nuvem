@@ -23,6 +23,8 @@ GROQ_MODELS = [m.strip() for m in os.environ.get(
     "llama-3.3-70b-versatile,openai/gpt-oss-20b,qwen/qwen3-32b,moonshotai/kimi-k2-instruct-0905").split(",") if m.strip()]
 _GROQ_OK = ""
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "")
+CB_PHONE = os.environ.get("CALLMEBOT_PHONE", "")
+CB_KEY = os.environ.get("CALLMEBOT_APIKEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("jarvis-nuvem")
@@ -95,6 +97,143 @@ def tg(metodo: str, **kw):
         log.warning(f"tg {metodo}: {e}")
         return {}
 
+def _agora_sp():
+    try:
+        from zoneinfo import ZoneInfo
+        import datetime as _dt
+        return _dt.datetime.now(ZoneInfo("America/Sao_Paulo"))
+    except Exception:
+        import datetime as _dt
+        return _dt.datetime.utcnow() - _dt.timedelta(hours=3)
+
+PIADAS = [
+    "Por que o computador foi ao medico? Porque estava com virus!",
+    "O que o zero disse pro oito? Que cinto maneiro!",
+    "Eu ia contar uma piada sobre UDP, mas voce pode nao receber.",
+]
+
+AJUDA_NUVEM = (
+    "Sou o JARVIS da nuvem. Falo igual ao do PC, mas sem tela, camera e programas.\n"
+    "ajuda — esta lista | hora | data | piada\n"
+    "manda mensagem + texto — WhatsApp nuvem pro seu numero\n"
+    "manda audio + texto — mando áudio com minha voz\n"
+    "me liga + texto — te ligo e falo (gasta 1 chamada grátis)\n"
+    "Resto eu converso normal."
+)
+
+def _norm(t: str) -> str:
+    import unicodedata as _u
+    t = t.lower().strip()
+    return "".join(c for c in _u.normalize("NFD", t) if _u.category(c) != "Mn")
+
+def _tira(texto: str, prefs: list) -> str:
+    n = _norm(texto)
+    for p in prefs:
+        if n.startswith(_norm(p)):
+            return texto[len(p):].strip()
+    return texto
+
+def comandos(chat: int, texto: str) -> bool:
+    """Comandos estilo PC. Retorna True se resolveu."""
+    import random as _r
+    n = _norm(texto)
+    if n in ("ajuda", "/help", "help", "o que voce faz", "comandos"):
+        tg("sendMessage", chat_id=chat, text=AJUDA_NUVEM)
+        return True
+    if n in ("hora", "que horas sao", "horas"):
+        tg("sendMessage", chat_id=chat,
+           text=f"São {_agora_sp().strftime('%H:%M')} em São Paulo.")
+        return True
+    if n.startswith("data") or "que dia" in n or "dia de hoje" in n:
+        dias = ["segunda-feira", "terca-feira", "quarta-feira", "quinta-feira",
+                "sexta-feira", "sabado", "domingo"]
+        meses = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
+                 "agosto", "setembro", "outubro", "novembro", "dezembro"]
+        a = _agora_sp()
+        tg("sendMessage", chat_id=chat,
+           text=f"Hoje e {dias[a.weekday()]}, {a.day} de {meses[a.month-1]} de {a.year}.")
+        return True
+    if "piada" in n:
+        tg("sendMessage", chat_id=chat, text=_r.choice(PIADAS))
+        return True
+    if n.startswith(("manda mensagem", "manda nuvem", "mandar mensagem", "mandar nuvem")):
+        msg = _tira(texto, ["manda mensagem ", "manda nuvem ", "mandar mensagem ",
+                            "mandar nuvem ", "manda mensagem", "manda nuvem"])
+        if not msg:
+            tg("sendMessage", chat_id=chat, text="Que mensagem mando na nuvem?")
+            return True
+        if not (CB_PHONE and CB_KEY):
+            tg("sendMessage", chat_id=chat, text="Nuvem sem apikey no host.")
+            return True
+        try:
+            import urllib.parse as _up
+            r = requests.get(f"https://api.callmebot.com/whatsapp.php?phone={CB_PHONE}"
+                             f"&text={_up.quote(msg)}&apikey={CB_KEY}", timeout=25)
+            tg("sendMessage", chat_id=chat, text="Mensagem nuvem enviada." if r.ok
+               else f"Nuvem falhou: {r.text[:150]}")
+        except Exception as e:
+            tg("sendMessage", chat_id=chat, text=f"Nuvem falhou: {e}")
+        return True
+    if n.startswith(("manda audio", "manda voz", "mandar audio")):
+        msg = _tira(texto, ["manda audio ", "manda voz ", "mandar audio "])
+        if not msg:
+            tg("sendMessage", chat_id=chat, text="Que áudio eu mando?")
+            return True
+        tg("sendMessage", chat_id=chat, text="Gerando o áudio...")
+        ok, resp = _audio(chat, msg)
+        tg("sendMessage", chat_id=chat, text="Áudio enviado." if ok else f"Áudio falhou: {resp}")
+        return True
+    if n.startswith(("me liga", "liga pra mim", "liga para mim", "me telefona")):
+        msg = _tira(texto, ["me liga ", "liga pra mim ", "liga para mim ", "me telefona ", "me liga"])
+        if not msg:
+            tg("sendMessage", chat_id=chat, text="O que eu falo quando ligar?")
+            return True
+        if not (CB_PHONE and CB_KEY):
+            tg("sendMessage", chat_id=chat, text="Ligação sem apikey no host.")
+            return True
+        try:
+            import urllib.parse as _up
+            r = requests.get(f"https://api.callmebot.com/call.php?phone={CB_PHONE}"
+                             f"&text={_up.quote(msg)}&apikey={CB_KEY}&lang=pt-BR", timeout=30)
+            tg("sendMessage", chat_id=chat, text="Ligando. Atende que eu falo e desligo." if r.ok
+               else f"Ligação falhou: {r.text[:150]}")
+        except Exception as e:
+            tg("sendMessage", chat_id=chat, text=f"Ligação falhou: {e}")
+        return True
+    return False
+
+def _audio(chat: int, texto: str) -> tuple:
+    """TTS Antonio + sendAudio. Retorna (ok, resp)."""
+    import subprocess as _sp
+    import tempfile as _tf
+    try:
+        with _tf.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(texto[:500])
+            txtf = f.name
+        tmp = txtf + ".mp3"
+        r = _sp.run(["python", "-m", "edge_tts", "--voice", "pt-BR-AntonioNeural",
+                     "--rate=-10%", "--pitch=-5Hz", "--file", txtf, "--write-media", tmp],
+                    capture_output=True, timeout=45)
+        try:
+            os.unlink(txtf)
+        except Exception:
+            pass
+        if r.returncode != 0 or not (os.path.exists(tmp) and os.path.getsize(tmp) > 1000):
+            return False, "tts falhou"
+        with open(tmp, "rb") as af:
+            rr = requests.post(f"{API}/sendAudio", data={"chat_id": chat},
+                               files={"audio": ("jarvis.mp3", af, "audio/mpeg")}, timeout=60)
+        return (True, "") if rr.ok else (False, rr.text[:150])
+    except Exception as e:
+        return False, str(e)
+    finally:
+        try:
+            if "tmp" in dir() and tmp and os.path.exists(tmp):
+                os.unlink(tmp)
+        except Exception:
+            pass
+
+
 def _http_keepalive():
     """Servidor HTTP minimo pro plano FREE (Web Service exige porta aberta)."""
     import threading
@@ -132,7 +271,9 @@ def main():
                     continue
                 if texto == "/start":
                     tg("sendMessage", chat_id=chat,
-                       text=f"Sistemas online. Sou o JARVIS de {DONO}, direto da nuvem. Pode falar.")
+                       text=f"Sistemas online. Sou o JARVIS de {DONO}, direto da nuvem. Manda 'ajuda' pra ver tudo.")
+                    continue
+                if comandos(chat, texto):
                     continue
                 tg("sendChatAction", chat_id=chat, action="typing")
                 tg("sendMessage", chat_id=chat, text=cerebro(chat, texto)[:4000])
