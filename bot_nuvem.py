@@ -31,24 +31,32 @@ log = logging.getLogger("jarvis-nuvem")
 API = f"https://api.telegram.org/bot{TOKEN}" if TOKEN else ""
 
 SYSTEM = (f"Voce e JARVIS, assistente pessoal de {DONO}. Fale portugues Brasil, "
-          "curto e direto, maximo 3 frases. Nunca diga que e outro modelo. Voce e JARVIS.")
+          "direto e completo: responda tudo com substancia, sem sermao, sem moralizar, "
+          "sem comecar com 'como IA'. Se algo for incerto, diga o que sabe e o que falta. "
+          "Nunca diga que e outro modelo. Voce e JARVIS.")
 
 _hist: dict = {}
+_anon: set = set()
 
 def cerebro(chat_id: int, texto: str) -> str:
-    hist = _hist.setdefault(chat_id, [])[-8:]
+    anon = chat_id in _anon
+    hist = [] if anon else _hist.setdefault(chat_id, [])[-8:]
     msgs = [{"role": "system", "content": SYSTEM}] + hist + [{"role": "user", "content": texto}]
+
+    def _guarda(resp: str):
+        if not anon:
+            _hist[chat_id] = (hist + [{"role": "user", "content": texto},
+                                     {"role": "assistant", "content": resp}])[-8:]
     # 1. Zen (OpenCode)
     if ZEN_KEY:
         try:
             r = requests.post(ZEN_BASE, headers={"Authorization": f"Bearer {ZEN_KEY}",
                               "Content-Type": "application/json"},
                               json={"model": ZEN_MODEL, "messages": msgs,
-                                    "max_tokens": 400, "temperature": 0.7}, timeout=60)
+                                    "max_tokens": 1000, "temperature": 0.7}, timeout=60)
             if r.ok:
                 resp = r.json()["choices"][0]["message"]["content"].strip()
-                _hist[chat_id] = (hist + [{"role": "user", "content": texto},
-                                         {"role": "assistant", "content": resp}])[-8:]
+                _guarda(resp)
                 return resp
             log.warning(f"zen {r.status_code}: {r.text[:150]}")
         except Exception as e:
@@ -62,12 +70,11 @@ def cerebro(chat_id: int, texto: str) -> str:
                                   headers={"Authorization": f"Bearer {GROQ_KEY}",
                                            "Content-Type": "application/json"},
                                   json={"model": _mod, "messages": msgs,
-                                        "max_tokens": 400, "temperature": 0.7}, timeout=60)
+                                        "max_tokens": 1000, "temperature": 0.7}, timeout=60)
                 if r.ok:
                     globals()["_GROQ_OK"] = _mod
                     resp = r.json()["choices"][0]["message"]["content"].strip()
-                    _hist[chat_id] = (hist + [{"role": "user", "content": texto},
-                                             {"role": "assistant", "content": resp}])[-8:]
+                    _guarda(resp)
                     return resp
                 log.warning(f"groq {_mod} {r.status_code}: {r.text[:120]}")
             except Exception as e:
@@ -82,8 +89,7 @@ def cerebro(chat_id: int, texto: str) -> str:
                               json=corpo, timeout=60)
             if r.ok:
                 resp = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                _hist[chat_id] = (hist + [{"role": "user", "content": texto},
-                                         {"role": "assistant", "content": resp}])[-8:]
+                _guarda(resp)
                 return resp
             log.warning(f"gemini {r.status_code}: {r.text[:150]}")
         except Exception as e:
@@ -113,8 +119,9 @@ PIADAS = [
 ]
 
 AJUDA_NUVEM = (
-    "Sou o JARVIS da nuvem. Falo igual ao do PC, mas sem tela, camera e programas.\n"
+    "Sou o JARVIS da nuvem. Direto, sem sermao, resposta completa.\n"
     "ajuda — esta lista | hora | data | piada\n"
+    "anon — liga/desliga o modo sem memoria (cada msg do zero)\n"
     "manda mensagem + texto — WhatsApp nuvem pro seu numero\n"
     "manda audio + texto — mando áudio com minha voz\n"
     "me liga + texto — te ligo e falo (gasta 1 chamada grátis)\n"
@@ -155,6 +162,15 @@ def comandos(chat: int, texto: str) -> bool:
         return True
     if "piada" in n:
         tg("sendMessage", chat_id=chat, text=_r.choice(PIADAS))
+        return True
+    if n in ("anon", "anonimo", "modo anon", "modo anonimo", "sem memoria"):
+        if chat in _anon:
+            _anon.discard(chat)
+            tg("sendMessage", chat_id=chat, text="Memória ligada de novo.")
+        else:
+            _anon.add(chat)
+            _hist.pop(chat, None)
+            tg("sendMessage", chat_id=chat, text="Modo sem memória: cada mensagem do zero, nada guardado.")
         return True
     if n.startswith(("manda mensagem", "manda nuvem", "mandar mensagem", "mandar nuvem")):
         msg = _tira(texto, ["manda mensagem ", "manda nuvem ", "mandar mensagem ",
