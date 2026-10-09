@@ -274,7 +274,7 @@ def main():
                     continue
                 if texto == "/start":
                     tg("sendMessage", chat_id=chat,
-                       text=f"Sistemas online. Sou o JARVIS de {DONO}, direto da nuvem. Manda 'ajuda' pra ver tudo.")
+                       text="Olá, tudo bem? Eu sou o JARVIS e fui criado do zero pelo Noelzin.")
                     continue
                 if comandos(chat, texto):
                     continue
