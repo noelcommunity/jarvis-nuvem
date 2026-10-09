@@ -23,6 +23,9 @@ GROQ_MODELS = [m.strip() for m in os.environ.get(
     "llama-3.3-70b-versatile,openai/gpt-oss-20b,qwen/qwen3-32b,moonshotai/kimi-k2-instruct-0905").split(",") if m.strip()]
 _GROQ_OK = ""
 GEMINI_KEY = os.environ.get("GEMINI_KEY", "")
+NOTRACK_KEY = os.environ.get("NOTRACK_KEY", "")
+NOTRACK_MODEL = os.environ.get("NOTRACK_MODEL", "notrack-uncensored")
+NOTRACK_BASE = os.environ.get("NOTRACK_BASE_URL", "https://api.notrack.ai/v1/chat/completions")
 CB_PHONE = os.environ.get("CALLMEBOT_PHONE", "")
 CB_KEY = os.environ.get("CALLMEBOT_APIKEY", "")
 
@@ -42,6 +45,20 @@ def cerebro(chat_id: int, texto: str) -> str:
     anon = chat_id in _anon
     hist = [] if anon else _hist.setdefault(chat_id, [])[-8:]
     msgs = [{"role": "system", "content": SYSTEM}] + hist + [{"role": "user", "content": texto}]
+    # 0. notrack (o modelo original) — prioridade quando configurado
+    if NOTRACK_KEY:
+        try:
+            r = requests.post(NOTRACK_BASE, headers={"Authorization": f"Bearer {NOTRACK_KEY}",
+                              "Content-Type": "application/json"},
+                              json={"model": NOTRACK_MODEL, "messages": msgs,
+                                    "max_tokens": 1000, "temperature": 0.7}, timeout=60)
+            if r.ok:
+                resp = r.json()["choices"][0]["message"]["content"].strip()
+                _guarda(resp)
+                return resp
+            log.warning(f"notrack {r.status_code}: {r.text[:150]}")
+        except Exception as e:
+            log.warning(f"notrack falhou: {e}")
 
     def _guarda(resp: str):
         if not anon:
